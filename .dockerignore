@@ -1,4 +1,4 @@
-git pushnode_modules
+node_modules
 .svelte-kit
 build
 .git

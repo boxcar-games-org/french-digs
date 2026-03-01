@@ -1,30 +1,34 @@
 # Build Stage
-FROM node:22-alpine AS builder
+FROM denoland/deno:2.4.0 AS builder
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci
+# Copy deno config files first for layer caching
+COPY deno.json deno.lock ./
 
+# Cache dependencies
+RUN deno install --allow-scripts
+
+# Copy source
 COPY . .
-RUN npm run build
-RUN npm prune --production
+
+# Build the SvelteKit app
+RUN deno task build
 
 # Production Stage
-FROM node:22-alpine
+FROM denoland/deno:2.4.0
 
 WORKDIR /app
 
+# Copy built output and deps
 COPY --from=builder /app/build build/
 COPY --from=builder /app/node_modules node_modules/
-COPY package.json .
+COPY deno.json .
 
-# Set environment variables
 ENV NODE_ENV=production
 ENV PORT=3000
-# Update this to match your specific domain requirements if needed
 ENV ORIGIN=https://www.boxcar-games.com
 
 EXPOSE 3000
 
-CMD [ "node", "build" ]
+CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-env", "build/index.js"]
