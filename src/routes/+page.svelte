@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 
 	function startGame() {
-		goto('/game');
+		goto('/french-digs/game');
 	}
 </script>
 
