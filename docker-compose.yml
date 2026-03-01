@@ -1,0 +1,16 @@
+services:
+  french-digs:
+    build: .
+    container_name: french-digs
+    restart: unless-stopped
+    networks:
+      - web
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - ORIGIN=https://www.boxcar-games.com
+
+networks:
+  web:
+    external: true
+    name: web
