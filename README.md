@@ -1,38 +1,34 @@
-# sv
+# French Digs
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
-
-## Creating a project
-
-If you're seeing this, you've probably already done this step. Congrats!
-
+## 1. Local Development
 ```sh
-# create a new project in the current directory
-npx sv create
-
-# create a new project in my-app
-npx sv create my-app
+deno install
+deno task dev
 ```
 
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
+## 2. Build and Push
+You must build on your computer and push the `build/` folder.
 ```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+deno task build
+git add .
+git commit -m "update build"
+git push
 ```
 
-## Building
+## 3. Deploy Settings
+Go to the **infrastructure** repo on GitHub and run the **Manual App Deploy** action. Use these exact values:
 
-To create a production version of your app:
-
-```sh
-npm run build
+**App Name:**
+```text
+french-digs
 ```
 
-You can preview the production build with `npm run preview`.
+**Repo URL:**
+```text
+https://github.com/boxcar-games-org/french-digs.git
+```
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+## How it works
+- **Dockerfile:** Instead of building on the server, it just copies your local `build/` folder. This is fast and matches your computer exactly.
+- **Docker Compose:** Connects the app to the `web` network so Caddy can see it.
+- **Routing:** Configured to run at `boxcar-games.com/french-digs`.
