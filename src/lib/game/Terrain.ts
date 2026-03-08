@@ -23,7 +23,7 @@ export class Terrain {
 
 	init() {
 		// --- 1. Visual Setup ---
-		this.ctx.fillStyle = '#29138b';
+		this.ctx.fillStyle = '#418b13';
 		this.ctx.fillRect(0, 0, this.width, this.height);
 
 		// Carve initial Sky
@@ -62,7 +62,7 @@ export class Terrain {
 
 		// Fill right side
 		this.ctx.globalCompositeOperation = 'destination-over';
-		this.ctx.fillStyle = '#29138b';
+		this.ctx.fillStyle = '#418b13';
 		this.ctx.fillRect(oldWidth, 0, newWidth - oldWidth, this.height);
 
 		// Clear sky on right
