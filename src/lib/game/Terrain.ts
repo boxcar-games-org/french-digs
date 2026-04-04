@@ -1,138 +1,177 @@
+import { Chunk, CHUNK_SIZE } from './Chunk';
+
+const MAX_DIG_HISTORY = 50;
+const ROWS_PER_FRAME = 64;
+
 export class Terrain {
-	canvas: HTMLCanvasElement;
-	ctx: CanvasRenderingContext2D;
-	collisionGrid: Uint8Array;
-	width: number;
-	height: number;
+	chunks: Map<number, Chunk> = new Map();
+	worldWidth: number;
 	groundLevel: number;
+	seed: number;
 
-	constructor(width: number, height: number, groundLevel: number = 200) {
-		this.width = width;
-		this.height = height;
+	// Fix 2: sparse dig history — key = chunkY, value = flat diff mask
+	private digHistory: Map<number, Uint8Array> = new Map();
+	private digHistoryOrder: number[] = [];
+
+	// Fix 1: async generation queue — sorted closest-first
+	private generationQueue: number[] = [];
+
+	get width(): number {
+		return this.worldWidth;
+	}
+
+	constructor(worldWidth: number, groundLevel: number) {
+		this.worldWidth = worldWidth;
 		this.groundLevel = groundLevel;
+		this.seed = Math.floor(Math.random() * 100000);
 
-		this.canvas = document.createElement('canvas');
-		this.canvas.width = width;
-		this.canvas.height = height;
-		this.ctx = this.canvas.getContext('2d')!;
-
-		this.collisionGrid = new Uint8Array(width * height);
-
-		this.init();
+		// Pre-warm chunks 0 and 1 synchronously so there's no pop-in at startup
+		this._generateSync(0);
+		this._generateSync(1);
 	}
 
-	init() {
-		// --- 1. Visual Setup ---
-		this.ctx.fillStyle = '#418b13';
-		this.ctx.fillRect(0, 0, this.width, this.height);
-
-		// Carve initial Sky
-		this.ctx.globalCompositeOperation = 'destination-out';
-		this.ctx.fillRect(0, 0, this.width, this.groundLevel);
-		this.ctx.globalCompositeOperation = 'source-over';
-
-		// --- 2. Collision Grid Setup ---
-		// Fill with "Solid" (1)
-		this.collisionGrid.fill(1);
-		// Clear "Sky" (0)
-		this.collisionGrid.fill(0, 0, this.groundLevel * this.width);
+	private _generateSync(chunkY: number) {
+		if (this.chunks.has(chunkY)) return;
+		const chunk = new Chunk(chunkY, this.worldWidth);
+		chunk.generate(this.seed);
+		this._applyDigHistory(chunk);
+		this.chunks.set(chunkY, chunk);
 	}
 
-	resize(newWidth: number) {
-		if (newWidth <= this.width) return;
-
-		const oldCanvas = this.canvas;
-		const oldGrid = this.collisionGrid;
-		const oldWidth = this.width;
-
-		// Create new buffers
-		this.width = newWidth;
-		this.canvas = document.createElement('canvas');
-		this.canvas.width = newWidth;
-		this.canvas.height = this.height;
-		this.ctx = this.canvas.getContext('2d')!;
-		this.collisionGrid = new Uint8Array(newWidth * this.height);
-
-		// Re-init basic terrain
-		this.init();
-
-		// Draw old terrain on top
-		this.ctx.clearRect(0, 0, this.width, this.height);
-		this.ctx.drawImage(oldCanvas, 0, 0);
-
-		// Fill right side
-		this.ctx.globalCompositeOperation = 'destination-over';
-		this.ctx.fillStyle = '#418b13';
-		this.ctx.fillRect(oldWidth, 0, newWidth - oldWidth, this.height);
-
-		// Clear sky on right
-		this.ctx.globalCompositeOperation = 'destination-out';
-		this.ctx.fillRect(oldWidth, 0, newWidth - oldWidth, this.groundLevel);
-		this.ctx.globalCompositeOperation = 'source-over';
-
-		// Copy old grid data
-		// Iterate rows and copy memory buffers
-		for (let y = this.groundLevel; y < this.height; y++) {
-			const oldStart = y * oldWidth;
-			const newStart = y * newWidth;
-			this.collisionGrid.set(oldGrid.subarray(oldStart, oldStart + oldWidth), newStart);
-		}
-	}
-
-	isSolid(x: number, y: number): boolean {
-		if (x < 0 || x >= this.width || y < 0 || y >= this.height) {
-			return false;
-		}
-		return this.collisionGrid[Math.floor(y) * this.width + Math.floor(x)] === 1;
-	}
-
-	dig(x: number, y: number, radius: number) {
-		// 1. Update Visuals (Canvas API)
-		this.ctx.globalCompositeOperation = 'destination-out';
-		this.ctx.beginPath();
-		this.ctx.arc(x, y, radius, 0, Math.PI * 2);
-		this.ctx.fill();
-		this.ctx.globalCompositeOperation = 'source-over';
-
-		// 2. Update Physics (Optimized Scanline)
-		this.carveCircle(x, y, radius);
-	}
-
-	// Optimized logic: Calculates the horizontal span of the circle for each row
-	// and uses native array filling instead of per-pixel loops.
-	private carveCircle(cx: number, cy: number, radius: number) {
-		const rSq = radius * radius;
-		const floorRadius = Math.floor(radius);
-
-		// Determine vertical bounds clipped to world height
-		const minY = Math.max(0, Math.floor(cy - floorRadius));
-		const maxY = Math.min(this.height - 1, Math.ceil(cy + floorRadius));
-
-		for (let y = minY; y <= maxY; y++) {
-			const dy = y - cy;
-			// Calculate chord width: x = sqrt(r^2 - y^2)
-			// Math.max(0, ...) prevents NaN if rounding errors push slight negative
-			const halfWidth = Math.sqrt(Math.max(0, rSq - dy * dy));
-
-			// Determine horizontal bounds clipped to world width
-			const startX = Math.max(0, Math.floor(cx - halfWidth));
-			const endX = Math.min(this.width, Math.ceil(cx + halfWidth));
-
-			// Use native fill for maximum performance
-			if (startX < endX) {
-				const rowOffset = y * this.width;
-				this.collisionGrid.fill(0, rowOffset + startX, rowOffset + endX);
+	private _applyDigHistory(chunk: Chunk) {
+		const diff = this.digHistory.get(chunk.chunkY);
+		if (!diff) return;
+		// Re-carve every dug cell onto the freshly generated chunk
+		const size = this.worldWidth * CHUNK_SIZE;
+		for (let i = 0; i < size; i++) {
+			if (diff[i] === 1) {
+				const x = i % this.worldWidth;
+				const localY = Math.floor(i / this.worldWidth);
+				chunk.grid[i] = 0;
+				// Punch a 1px hole in the canvas for this cell
+				chunk['ctx'].clearRect(x, localY, 1, 1);
 			}
 		}
 	}
 
-	draw(ctx: CanvasRenderingContext2D, cameraY: number, viewHeight: number) {
-		const sy = Math.max(0, cameraY);
-		const dy = sy;
-		const sh = Math.min(this.height - sy, viewHeight + 100);
+	/** Called every frame from Game.update() — replaces ensureChunksAround */
+	tick(playerWorldY: number, playerVelocityY: number = 0) {
+		const currentChunkY = Math.floor(playerWorldY / CHUNK_SIZE);
 
-		if (sh > 0) {
-			ctx.drawImage(this.canvas, 0, sy, this.width, sh, 0, dy, this.width, sh);
+		// Velocity-based look-ahead: fall faster → load further ahead
+		const lookahead = Math.max(2, Math.ceil((Math.abs(playerVelocityY) / CHUNK_SIZE) * 60));
+		const loadMin = Math.max(0, currentChunkY - 1);
+		const loadMax = currentChunkY + 2 + lookahead;
+
+		// Create chunk objects for any missing slots and enqueue them
+		for (let cy = loadMin; cy <= loadMax; cy++) {
+			if (!this.chunks.has(cy)) {
+				const chunk = new Chunk(cy, this.worldWidth);
+				chunk.startGeneration(this.seed);
+				this.chunks.set(cy, chunk);
+
+				// Insert into queue sorted by distance to player (closest first)
+				const dist = Math.abs(cy - currentChunkY);
+				let insertAt = this.generationQueue.length;
+				for (let i = 0; i < this.generationQueue.length; i++) {
+					if (Math.abs(this.generationQueue[i] - currentChunkY) > dist) {
+						insertAt = i;
+						break;
+					}
+				}
+				this.generationQueue.splice(insertAt, 0, cy);
+			}
+		}
+
+		// Evict chunks well outside the load range
+		for (const [cy] of this.chunks) {
+			if (cy < currentChunkY - 2 || cy > currentChunkY + 3 + lookahead) {
+				this.chunks.delete(cy);
+				// Remove from queue if pending
+				const qi = this.generationQueue.indexOf(cy);
+				if (qi !== -1) this.generationQueue.splice(qi, 1);
+			}
+		}
+
+		// Process the generation queue with a row budget
+		this._processQueue(ROWS_PER_FRAME);
+	}
+
+	private _processQueue(rowBudget: number) {
+		let remaining = rowBudget;
+
+		while (remaining > 0 && this.generationQueue.length > 0) {
+			const cy = this.generationQueue[0];
+			const chunk = this.chunks.get(cy);
+
+			if (!chunk || chunk.fullyGenerated) {
+				this.generationQueue.shift();
+				continue;
+			}
+
+			const diff = this.digHistory.get(cy);
+			const done = chunk.continueGeneration(remaining, diff);
+			remaining -= ROWS_PER_FRAME; // conservative: treat one call as full budget use
+
+			if (done) {
+				this.generationQueue.shift();
+			} else {
+				break; // used up budget, resume next frame
+			}
+		}
+	}
+
+	isSolid(worldX: number, worldY: number): boolean {
+		if (worldY < 0) return false;
+		const chunk = this.chunks.get(Math.floor(worldY / CHUNK_SIZE));
+		if (!chunk) return true;
+		return chunk.isSolid(worldX, worldY);
+	}
+
+	dig(worldX: number, worldY: number, radius: number) {
+		const affected = new Set([
+			Math.floor((worldY - radius) / CHUNK_SIZE),
+			Math.floor(worldY / CHUNK_SIZE),
+			Math.floor((worldY + radius) / CHUNK_SIZE)
+		]);
+
+		for (const cy of affected) {
+			this.chunks.get(cy)?.dig(worldX, worldY, radius);
+			this._recordDig(cy, worldX, worldY - cy * CHUNK_SIZE, radius);
+		}
+	}
+
+	/** Fix 2: persist dig cells into the diff mask for this chunkY */
+	private _recordDig(chunkY: number, cx: number, localCY: number, radius: number) {
+		if (!this.digHistory.has(chunkY)) {
+			// Cap history size
+			if (this.digHistoryOrder.length >= MAX_DIG_HISTORY) {
+				const oldest = this.digHistoryOrder.shift()!;
+				this.digHistory.delete(oldest);
+			}
+			this.digHistory.set(chunkY, new Uint8Array(this.worldWidth * CHUNK_SIZE));
+			this.digHistoryOrder.push(chunkY);
+		}
+
+		const diff = this.digHistory.get(chunkY)!;
+		const rSq = radius * radius;
+		const minY = Math.max(0, Math.floor(localCY - radius));
+		const maxY = Math.min(CHUNK_SIZE - 1, Math.ceil(localCY + radius));
+
+		for (let y = minY; y <= maxY; y++) {
+			const dy = y - localCY;
+			const halfWidth = Math.sqrt(Math.max(0, rSq - dy * dy));
+			const startX = Math.max(0, Math.floor(cx - halfWidth));
+			const endX = Math.min(this.worldWidth, Math.ceil(cx + halfWidth));
+			for (let x = startX; x < endX; x++) {
+				diff[y * this.worldWidth + x] = 1;
+			}
+		}
+	}
+
+	draw(ctx: CanvasRenderingContext2D) {
+		for (const chunk of this.chunks.values()) {
+			chunk.draw(ctx);
 		}
 	}
 }

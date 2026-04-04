@@ -113,22 +113,19 @@ export class WordManager {
 	position: { x: number; y: number } = { x: 0, y: 0 };
 	score: number = 0;
 
-	spawn(worldWidth: number, groundLevel: number, worldHeight: number = 2000) {
+	spawn(worldWidth: number, groundLevel: number, playerY: number) {
 		this.currentWord = this.words[Math.floor(Math.random() * this.words.length)];
 
 		const minX = 100;
 		const maxX = worldWidth > 200 ? worldWidth - 100 : 100;
 
-		// Calculate valid depth range
-		// Start deeper than ground level to ensure they are "in" the earth
-		const minDepth = groundLevel + 150;
-		// Leave some buffer at the very bottom of the world
-		const maxDepth = worldHeight - 200;
-		const depthRange = Math.max(100, maxDepth - minDepth);
+		// Place word 300–900px below the player's current position
+		const minDepth = Math.max(groundLevel + 150, playerY + 300);
+		const maxDepth = minDepth + 600;
 
 		this.position = {
 			x: minX + Math.random() * (maxX - minX),
-			y: minDepth + Math.random() * depthRange
+			y: minDepth + Math.random() * (maxDepth - minDepth)
 		};
 
 		this.speak(this.currentWord);
@@ -170,12 +167,10 @@ export class WordManager {
 	}
 
 	draw(ctx: CanvasRenderingContext2D, terrain: Terrain) {
-		// Determine visibility based on terrain solidity
 		const isSolid = terrain.isSolid(this.position.x, this.position.y);
 		const exposed = !isSolid;
 
 		ctx.save();
-		// If exposed, full opacity. If buried, make it visible enough to see (0.5)
 		ctx.globalAlpha = exposed ? 1.0 : 0.5;
 
 		const { x, y } = this.position;
@@ -183,20 +178,17 @@ export class WordManager {
 		ctx.textAlign = 'center';
 		ctx.textBaseline = 'middle';
 
-		// 1. Text Outline (Stroke) - Thicker for readability
 		ctx.font = '900 36px "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 		ctx.lineWidth = 6;
 		ctx.lineJoin = 'round';
-		ctx.strokeStyle = '#3E2723'; // Dark earthy brown/black outline
+		ctx.strokeStyle = '#3E2723';
 		ctx.strokeText(this.currentWord.fr, x, y);
 
-		// 2. Text Fill - Bright Gold
 		ctx.fillStyle = '#FFD700';
 		ctx.fillText(this.currentWord.fr, x, y);
 
-		// 3. Inner Highlight (Optional, for "shiny" look)
 		ctx.lineWidth = 1;
-		ctx.strokeStyle = '#FFFFE0'; // Light yellow/white
+		ctx.strokeStyle = '#FFFFE0';
 		ctx.strokeText(this.currentWord.fr, x, y);
 
 		ctx.restore();

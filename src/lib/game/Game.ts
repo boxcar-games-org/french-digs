@@ -1,32 +1,29 @@
 import { goto } from '$app/navigation';
+import { GROUND_LEVEL } from './Chunk';
 import { Player } from './Player';
 import { Terrain } from './Terrain';
 import { WordManager } from './WordManager';
+
+const WORLD_WIDTH = Math.max(typeof window !== 'undefined' ? window.innerWidth : 1024, 1024);
 
 export class Game {
 	canvas: HTMLCanvasElement;
 	ctx: CanvasRenderingContext2D;
 	animationId: number = 0;
 
-	// Game Modules
 	terrain: Terrain;
 	player: Player;
 	wordManager: WordManager;
 
-	// Viewport
 	width: number = 0;
 	height: number = 0;
-	readonly worldHeight = 5000;
-	readonly groundLevel = 200;
 
 	camera = { x: 0, y: 0 };
 	mouse = { x: 0, y: 0, down: false };
 
 	constructor(canvas: HTMLCanvasElement) {
 		this.canvas = canvas;
-		// alpha: false tells the browser we don't need transparency on the backbuffer, speeding up compositing
 		this.ctx = canvas.getContext('2d', { alpha: false })!;
-		// Disable smoothing for faster rendering and sharper edges
 		this.ctx.imageSmoothingEnabled = false;
 
 		this.width = window.innerWidth;
@@ -34,15 +31,19 @@ export class Game {
 		this.canvas.width = this.width;
 		this.canvas.height = this.height;
 
-		// Initialize Modules
-		this.terrain = new Terrain(this.width, this.worldHeight, this.groundLevel);
-		this.player = new Player(400, 50);
+		this.terrain = new Terrain(WORLD_WIDTH, GROUND_LEVEL);
+
+		// Find the actual terrain surface at the spawn X
+		const spawnX = WORLD_WIDTH / 2;
+		let spawnY = GROUND_LEVEL;
+		while (spawnY < GROUND_LEVEL + 512 && !this.terrain.isSolid(spawnX, spawnY)) {
+			spawnY++;
+		}
+		this.player = new Player(spawnX - 15, spawnY - 32);
+
 		this.wordManager = new WordManager();
+		this.wordManager.spawn(WORLD_WIDTH, GROUND_LEVEL, this.player.y);
 
-		// Spawn first word with world height knowledge
-		this.wordManager.spawn(this.width, this.groundLevel, this.worldHeight);
-
-		// Bind methods for event listeners
 		this.handleKeyDown = this.handleKeyDown.bind(this);
 		this.handleMouseMove = this.handleMouseMove.bind(this);
 		this.handleMouseDown = this.handleMouseDown.bind(this);
@@ -53,7 +54,7 @@ export class Game {
 		this.resize = this.resize.bind(this);
 
 		this.addEventListeners();
-		this.resize(); // Ensure initial sizing
+		this.resize();
 		this.gameLoop();
 	}
 
@@ -84,15 +85,10 @@ export class Game {
 	private resize() {
 		this.width = window.innerWidth;
 		this.height = window.innerHeight;
-
 		if (this.canvas) {
 			this.canvas.width = this.width;
 			this.canvas.height = this.height;
-			this.ctx.imageSmoothingEnabled = false; // Re-apply after resize
-		}
-
-		if (this.terrain) {
-			this.terrain.resize(Math.max(this.width, window.innerWidth));
+			this.ctx.imageSmoothingEnabled = false;
 		}
 	}
 
@@ -103,18 +99,18 @@ export class Game {
 	}
 
 	private update() {
-		// 1. Update Player & Physics
 		this.player.update(this.mouse, this.camera, this.terrain, this.terrain.width);
 
-		// 2. Handle Digging
+		// Fix 1: pass velocity for lookahead, use tick() instead of ensureChunksAround()
+		this.terrain.tick(this.player.y, this.player.velocityY);
+
 		if (this.player.blaster.active && this.player.blaster.cooldown <= 0) {
 			this.terrain.dig(this.player.blaster.x, this.player.blaster.y, this.player.blaster.radius);
 			this.player.blaster.cooldown = 3;
 		}
 
-		// 3. Check for Word
 		if (this.wordManager.checkFound(this.player)) {
-			this.wordManager.spawn(this.terrain.width, this.groundLevel, this.worldHeight);
+			this.wordManager.spawn(this.terrain.width, GROUND_LEVEL, this.player.y);
 		}
 
 		this.updateCamera();
@@ -127,13 +123,12 @@ export class Game {
 		this.ctx.fillText('Mouse/Touch: Aim / Hold to Dig & Move', 20, 30);
 		this.ctx.fillText('Esc: Quit', 20, 50);
 		this.ctx.fillText(
-			`Depth: ${Math.floor(Math.max(0, (this.player.y - this.groundLevel) / 10))}m`,
+			`Depth: ${Math.floor(Math.max(0, (this.player.y - GROUND_LEVEL) / 10))}m`,
 			20,
 			70
 		);
 		this.ctx.fillText(`Score: ${this.wordManager.score}`, 20, 90);
 
-		// Target Word Indicator
 		const starX = this.width - 80;
 		const starY = 80;
 		this.drawStarShape(this.ctx, starX, starY, 5, 60, 30);
@@ -158,18 +153,12 @@ export class Game {
 	) {
 		let rot = (Math.PI / 2) * 3;
 		const step = Math.PI / spikes;
-
 		ctx.beginPath();
 		ctx.moveTo(cx, cy - outerRadius);
 		for (let i = 0; i < spikes; i++) {
-			let x = cx + Math.cos(rot) * outerRadius;
-			let y = cy + Math.sin(rot) * outerRadius;
-			ctx.lineTo(x, y);
+			ctx.lineTo(cx + Math.cos(rot) * outerRadius, cy + Math.sin(rot) * outerRadius);
 			rot += step;
-
-			x = cx + Math.cos(rot) * innerRadius;
-			y = cy + Math.sin(rot) * innerRadius;
-			ctx.lineTo(x, y);
+			ctx.lineTo(cx + Math.cos(rot) * innerRadius, cy + Math.sin(rot) * innerRadius);
 			rot += step;
 		}
 		ctx.lineTo(cx, cy - outerRadius);
@@ -182,71 +171,50 @@ export class Game {
 	}
 
 	private drawNavigationArrow(ctx: CanvasRenderingContext2D) {
-		const { x: px, y: py, width: pw, height: ph } = this.player;
-		const { x: wx, y: wy } = this.wordManager.position;
+		const cx = this.player.x + this.player.width / 2;
+		const cy = this.player.y + this.player.height / 2;
+		const dx = this.wordManager.position.x - cx;
+		const dy = this.wordManager.position.y - cy;
 
-		const cx = px + pw / 2;
-		const cy = py + ph / 2;
-
-		const dx = wx - cx;
-		const dy = wy - cy;
-
-		// Calculate angle to target
 		const angle = Math.atan2(dy, dx);
-
-		// Color based on distance (Red -> Green as we get closer)
 		const dist = Math.sqrt(dx * dx + dy * dy);
-		const maxDist = 1000; // Distance for full red
-		// t goes from 0 (close) to 1 (far)
-		const t = Math.min(1, dist / maxDist);
-		// Hue: 120 (Green) at t=0, 0 (Red) at t=1
-		const hue = (1 - t) * 120;
-		const color = `hsl(${hue}, 100%, 50%)`;
+		const t = Math.min(1, dist / 1000);
+		const color = `hsl(${(1 - t) * 120}, 100%, 50%)`;
 
-		// Determine arrow position: orbit the player
-		const orbitRadius = 95; // Distance from player center (Increased from 60)
-		const arrowX = cx + Math.cos(angle) * orbitRadius;
-		const arrowY = cy + Math.sin(angle) * orbitRadius;
+		const arrowX = cx + Math.cos(angle) * 95;
+		const arrowY = cy + Math.sin(angle) * 95;
 
 		ctx.save();
 		ctx.translate(arrowX, arrowY);
 		ctx.rotate(angle);
-
-		// Draw Arrow
 		ctx.fillStyle = color;
 		ctx.strokeStyle = '#FFFFFF';
 		ctx.lineWidth = 2;
-
 		ctx.beginPath();
-		ctx.moveTo(10, 0); // Tip
-		ctx.lineTo(-8, 6); // Back Bottom
-		ctx.lineTo(-8, -6); // Back Top
+		ctx.moveTo(10, 0);
+		ctx.lineTo(-8, 6);
+		ctx.lineTo(-8, -6);
 		ctx.closePath();
-
 		ctx.fill();
 		ctx.stroke();
-
 		ctx.restore();
 	}
 
 	private draw() {
-		// Clear background
 		this.ctx.setTransform(1, 0, 0, 1, 0, 0);
 		this.ctx.fillStyle = '#87CEEB';
 		this.ctx.fillRect(0, 0, this.width, this.height);
 
 		this.ctx.save();
-		this.ctx.translate(-this.camera.x, -this.camera.y);
+		// Fix 3: floor the camera translate to eliminate sub-pixel seams
+		this.ctx.translate(-Math.floor(this.camera.x), -Math.floor(this.camera.y));
 
-		// Render Game Objects
-		this.terrain.draw(this.ctx, this.camera.y, this.height);
+		this.terrain.draw(this.ctx);
 		this.wordManager.draw(this.ctx, this.terrain);
 		this.player.draw(this.ctx);
 		this.drawNavigationArrow(this.ctx);
 
 		this.ctx.restore();
-
-		// Render UI
 		this.drawHUD();
 	}
 
@@ -256,24 +224,19 @@ export class Game {
 		this.animationId = requestAnimationFrame(this.gameLoop);
 	};
 
-	// --- Input Handlers ---
-
 	private async handleKeyDown(e: KeyboardEvent) {
 		if (e.key === 'Escape') {
 			this.destroy();
 			await goto('/');
 		}
 	}
-
 	private handleMouseMove(e: MouseEvent) {
 		this.mouse.x = e.clientX;
 		this.mouse.y = e.clientY;
 	}
-
 	private handleMouseDown(e: MouseEvent) {
 		if (e.button === 0) this.mouse.down = true;
 	}
-
 	private handleMouseUp(e: MouseEvent) {
 		if (e.button === 0) this.mouse.down = false;
 	}
@@ -286,7 +249,6 @@ export class Game {
 			this.mouse.down = true;
 		}
 	}
-
 	private handleTouchMove(e: TouchEvent) {
 		if (e.cancelable) e.preventDefault();
 		if (e.touches.length > 0) {
@@ -294,7 +256,6 @@ export class Game {
 			this.mouse.y = e.touches[0].clientY;
 		}
 	}
-
 	private handleTouchEnd(e: TouchEvent) {
 		if (e.cancelable) e.preventDefault();
 		if (e.touches.length === 0) this.mouse.down = false;
