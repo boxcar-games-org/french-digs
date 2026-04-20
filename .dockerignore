@@ -6,6 +6,4 @@ node_modules
 .DS_Store
 Dockerfile
 docker-compose.yml
-deno.json
-deno.lock
 README.md

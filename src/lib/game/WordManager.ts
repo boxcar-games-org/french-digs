@@ -1,3 +1,4 @@
+import words from '$lib/assets/words.json';
 import type { Player } from './Player';
 import type { Terrain } from './Terrain';
 
@@ -7,127 +8,67 @@ type WordPair = {
 };
 
 export class WordManager {
-	words: WordPair[] = [
-		{ fr: 'bonjour', en: 'hello' },
-		{ fr: 'merci', en: 'thank you' },
-		{ fr: 'amour', en: 'love' },
-		{ fr: 'soleil', en: 'sun' },
-		{ fr: 'lune', en: 'moon' },
-		{ fr: 'etoile', en: 'star' },
-		{ fr: 'chat', en: 'cat' },
-		{ fr: 'chien', en: 'dog' },
-		{ fr: 'fleur', en: 'flower' },
-		{ fr: 'monde', en: 'world' },
-		{ fr: 'reve', en: 'dream' },
-		{ fr: 'petit', en: 'small' },
-		{ fr: 'grand', en: 'big' },
-		{ fr: 'joie', en: 'joy' },
-		{ fr: 'ami', en: 'friend' },
-		{ fr: 'maison', en: 'house' },
-		{ fr: 'livre', en: 'book' },
-		{ fr: 'temps', en: 'time' },
-		{ fr: 'jour', en: 'day' },
-		{ fr: 'nuit', en: 'night' },
-		{ fr: 'eau', en: 'water' },
-		{ fr: 'pain', en: 'bread' },
-		{ fr: 'vin', en: 'wine' },
-		{ fr: 'cafe', en: 'coffee' },
-		{ fr: 'jardin', en: 'garden' },
-		{ fr: 'ville', en: 'city' },
-		{ fr: 'rue', en: 'street' },
-		{ fr: 'porte', en: 'door' },
-		{ fr: 'fenetre', en: 'window' },
-		{ fr: 'table', en: 'table' },
-		{ fr: 'chaise', en: 'chair' },
-		{ fr: 'lit', en: 'bed' },
-		{ fr: 'main', en: 'hand' },
-		{ fr: 'coeur', en: 'heart' },
-		{ fr: 'tete', en: 'head' },
-		{ fr: 'yeux', en: 'eyes' },
-		{ fr: 'bouche', en: 'mouth' },
-		{ fr: 'pied', en: 'foot' },
-		{ fr: 'bras', en: 'arm' },
-		{ fr: 'famille', en: 'family' },
-		{ fr: 'mere', en: 'mother' },
-		{ fr: 'pere', en: 'father' },
-		{ fr: 'enfant', en: 'child' },
-		{ fr: 'frere', en: 'brother' },
-		{ fr: 'soeur', en: 'sister' },
-		{ fr: 'homme', en: 'man' },
-		{ fr: 'femme', en: 'woman' },
-		{ fr: 'vie', en: 'life' },
-		{ fr: 'mort', en: 'death' },
-		{ fr: 'travail', en: 'work' },
-		{ fr: 'ecole', en: 'school' },
-		{ fr: 'musique', en: 'music' },
-		{ fr: 'danse', en: 'dance' },
-		{ fr: 'voiture', en: 'car' },
-		{ fr: 'train', en: 'train' },
-		{ fr: 'avion', en: 'plane' },
-		{ fr: 'bateau', en: 'boat' },
-		{ fr: 'mer', en: 'sea' },
-		{ fr: 'montagne', en: 'mountain' },
-		{ fr: 'foret', en: 'forest' },
-		{ fr: 'arbre', en: 'tree' },
-		{ fr: 'oiseau', en: 'bird' },
-		{ fr: 'poisson', en: 'fish' },
-		{ fr: 'fromage', en: 'cheese' },
-		{ fr: 'beurre', en: 'butter' },
-		{ fr: 'sucre', en: 'sugar' },
-		{ fr: 'sel', en: 'salt' },
-		{ fr: 'rouge', en: 'red' },
-		{ fr: 'bleu', en: 'blue' },
-		{ fr: 'vert', en: 'green' },
-		{ fr: 'jaune', en: 'yellow' },
-		{ fr: 'noir', en: 'black' },
-		{ fr: 'blanc', en: 'white' },
-		{ fr: 'gris', en: 'grey' },
-		{ fr: 'beau', en: 'beautiful' },
-		{ fr: 'joli', en: 'pretty' },
-		{ fr: 'bon', en: 'good' },
-		{ fr: 'mauvais', en: 'bad' },
-		{ fr: 'heureux', en: 'happy' },
-		{ fr: 'triste', en: 'sad' },
-		{ fr: 'rire', en: 'to laugh' },
-		{ fr: 'pleurer', en: 'to cry' },
-		{ fr: 'manger', en: 'to eat' },
-		{ fr: 'boire', en: 'to drink' },
-		{ fr: 'dormir', en: 'to sleep' },
-		{ fr: 'marcher', en: 'to walk' },
-		{ fr: 'courir', en: 'to run' },
-		{ fr: 'sauter', en: 'to jump' },
-		{ fr: 'danser', en: 'to dance' },
-		{ fr: 'chanter', en: 'to sing' },
-		{ fr: 'parler', en: 'to speak' },
-		{ fr: 'ecouter', en: 'to listen' },
-		{ fr: 'regarder', en: 'to watch' },
-		{ fr: 'lire', en: 'to read' },
-		{ fr: 'ecrire', en: 'to write' },
-		{ fr: 'apprendre', en: 'to learn' },
-		{ fr: 'comprendre', en: 'to understand' },
-		{ fr: 'savoir', en: 'to know' },
-		{ fr: 'vouloir', en: 'to want' }
-	];
+	words: WordPair[] = words;
 
 	currentWord: WordPair = { fr: '', en: '' };
 	position: { x: number; y: number } = { x: 0, y: 0 };
 	score: number = 0;
 
-	spawn(worldWidth: number, groundLevel: number, playerY: number) {
+	// Web Audio API context for sound effects
+	private audioContext: AudioContext | null = null;
+	private audioInitialized = false;
+
+	/**
+	 * Initialize/resume audio context - must be called from a user gesture handler
+	 */
+	initAudio() {
+		if (this.audioInitialized) return;
+
+		try {
+			if (!this.audioContext) {
+				this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+			}
+			// Resume if suspended (required on mobile after user gesture)
+			if (this.audioContext.state === 'suspended') {
+				this.audioContext.resume();
+			}
+			this.audioInitialized = true;
+		} catch (e) {
+			console.warn('Audio init failed:', e);
+		}
+	}
+
+	/**
+	 * Spawn a new word at a reachable location.
+	 * @param viewportWidth - Actual screen width in pixels
+	 * @param viewportHeight - Actual screen height in pixels
+	 * @param groundLevel - Y position where ground starts
+	 * @param player - Current player state for relative positioning
+	 */
+	spawn(viewportWidth: number, viewportHeight: number, groundLevel: number, player: Player) {
 		this.currentWord = this.words[Math.floor(Math.random() * this.words.length)];
 
-		const minX = 100;
-		const maxX = worldWidth > 200 ? worldWidth - 100 : 100;
+		const playerCenterX = player.x + player.width / 2;
+
+		// Spawn within viewport bounds, with padding
+		const padding = 40;
+		const minX = padding;
+		const maxX = viewportWidth - padding;
 
 		// Place word 300–900px below the player's current position
-		const minDepth = Math.max(groundLevel + 150, playerY + 300);
+		const minDepth = Math.max(groundLevel + 150, player.y + 300);
 		const maxDepth = minDepth + 600;
 
 		this.position = {
-			x: minX + Math.random() * (maxX - minX),
+			// Spawn near player horizontally (within ~1/3 of viewport)
+			x: Math.max(
+				minX,
+				Math.min(maxX, playerCenterX + (Math.random() - 0.5) * viewportWidth * 0.6)
+			),
 			y: minDepth + Math.random() * (maxDepth - minDepth)
 		};
 
+		// Speak the new word: French once, then English once
 		this.speak(this.currentWord);
 	}
 
@@ -140,11 +81,58 @@ export class WordManager {
 		const dist = Math.sqrt(dx * dx + dy * dy);
 
 		if (dist < 50) {
-			this.speak(this.currentWord);
+			// Play happy chime on collection (no speech repeat)
+			this.playChime();
 			this.score++;
 			return true;
 		}
 		return false;
+	}
+
+	/** Play a pleasant ascending chime using Web Audio API */
+	private playChime() {
+		try {
+			// Initialize audio context on first use
+			if (!this.audioContext) {
+				this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+			}
+
+			// Critical fix for mobile: resume if suspended
+			if (this.audioContext.state === 'suspended') {
+				this.audioContext.resume();
+			}
+
+			const now = this.audioContext.currentTime;
+
+			// Create three ascending tones for a happy chime effect
+			const frequencies = [784, 988, 1175]; // G5, B5, D6 - pleasant major arpeggio
+
+			frequencies.forEach((freq, i) => {
+				const oscillator = this.audioContext!.createOscillator();
+				const gainNode = this.audioContext!.createGain();
+
+				oscillator.connect(gainNode);
+				gainNode.connect(this.audioContext!.destination);
+
+				oscillator.type = 'sine';
+				oscillator.frequency.value = freq;
+
+				// Stagger each note slightly
+				const startTime = now + i * 0.08;
+				const duration = 0.15;
+
+				// Smooth envelope to avoid clicks
+				gainNode.gain.setValueAtTime(0, startTime);
+				gainNode.gain.linearRampToValueAtTime(0.3, startTime + 0.02);
+				gainNode.gain.linearRampToValueAtTime(0, startTime + duration);
+
+				oscillator.start(startTime);
+				oscillator.stop(startTime + duration);
+			});
+		} catch (e) {
+			// Silently fail if audio isn't available
+			console.warn('Chime playback failed:', e);
+		}
 	}
 
 	stopSpeech() {
@@ -155,12 +143,16 @@ export class WordManager {
 
 	private speak(word: WordPair) {
 		if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+			// Cancel any pending speech to avoid queue buildup
+			window.speechSynthesis.cancel();
+
 			const frUtterance = new SpeechSynthesisUtterance(word.fr);
 			frUtterance.lang = 'fr-FR';
 
 			const enUtterance = new SpeechSynthesisUtterance(word.en);
 			enUtterance.lang = 'en-US';
 
+			// Speak French first, then English
 			window.speechSynthesis.speak(frUtterance);
 			window.speechSynthesis.speak(enUtterance);
 		}

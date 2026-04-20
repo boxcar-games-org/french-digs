@@ -1,8 +1,12 @@
-FROM denoland/deno:alpine
+FROM node:20-alpine
 
 WORKDIR /app
 
-# The build/ folder is pre-built locally and committed to the repo
+# Install dependencies first for better caching
+COPY package.json package-lock.json* ./
+RUN npm ci --production
+
+# Copy the pre-built output
 COPY build/ build/
 
 ENV NODE_ENV=production
@@ -11,5 +15,5 @@ ENV ORIGIN=https://www.boxcar-games.com
 
 EXPOSE 3000
 
-# Run the SvelteKit build output using Deno's Node-compatibility layer
-CMD ["run", "-A", "build/index.js"]
+# Run the SvelteKit build output with Node
+CMD ["node", "build/index.js"]

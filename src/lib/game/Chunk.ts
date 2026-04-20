@@ -1,5 +1,11 @@
-export const CHUNK_SIZE = 512;
+export let CHUNK_SIZE = 256; // Reduced from 512 for mobile performance
 export const GROUND_LEVEL = 200;
+
+// Call this on init to set chunk size based on viewport
+export function initChunkSize(viewportHeight: number) {
+	// Use ~1/3 of viewport height, clamped between 128-384
+	CHUNK_SIZE = Math.max(128, Math.min(384, Math.floor(viewportHeight / 3)));
+}
 
 export class Chunk {
 	canvas: HTMLCanvasElement;
@@ -14,10 +20,12 @@ export class Chunk {
 	private _seed: number = 0;
 	private _nextRow: number = 0;
 	private _imageData: ImageData | null = null;
+	private _isMobile: boolean;
 
-	constructor(chunkY: number, worldWidth: number) {
+	constructor(chunkY: number, worldWidth: number, isMobile: boolean = false) {
 		this.chunkY = chunkY;
 		this.worldWidth = worldWidth;
+		this._isMobile = isMobile;
 
 		this.canvas = document.createElement('canvas');
 		this.canvas.width = worldWidth;
@@ -65,7 +73,6 @@ export class Chunk {
 			if (this.chunkY === 0 && y < GROUND_LEVEL) {
 				// Sky rows — force air
 				this.grid.fill(0, y * this.worldWidth, (y + 1) * this.worldWidth);
-				// imageData already zeroed (transparent)
 				continue;
 			}
 
@@ -82,13 +89,13 @@ export class Chunk {
 					continue;
 				}
 
-				const n1 = this.smoothNoise(x, wy, 120, seed);
-				const n2 = this.smoothNoise(x, wy, 40, seed + 1);
-				const value = n1 * 0.7 + n2 * 0.3;
+				// Mobile optimization: skip secondary noise layer
+				const value = this._isMobile
+					? this.smoothNoise(x, wy, 120, seed)
+					: this.smoothNoise(x, wy, 120, seed) * 0.7 + this.smoothNoise(x, wy, 40, seed + 1) * 0.3;
 
 				if (value > solidThreshold) {
 					this.grid[idx] = 0;
-					// air — leave transparent
 				} else {
 					this.grid[idx] = 1;
 					data[p] = r;
@@ -107,7 +114,6 @@ export class Chunk {
 			return true;
 		}
 
-		// Partial flush so the player sees progress
 		this.flushImageData();
 		return false;
 	}
@@ -200,13 +206,11 @@ export class Chunk {
 		const worldY = this.chunkY * CHUNK_SIZE;
 
 		if (!this.fullyGenerated) {
-			// Draw a solid placeholder rectangle so there are no transparent holes
 			const { r, g, b } = this.terrainColor();
 			ctx.fillStyle = `rgb(${r},${g},${b})`;
 			ctx.fillRect(0, worldY, this.worldWidth, CHUNK_SIZE);
 		}
 
-		// Fix 3: overdraw by 1px to cover seam between chunks
 		ctx.drawImage(this.canvas, 0, worldY, this.worldWidth, CHUNK_SIZE + 1);
 	}
 }

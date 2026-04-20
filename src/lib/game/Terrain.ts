@@ -1,13 +1,18 @@
-import { Chunk, CHUNK_SIZE } from './Chunk';
+import { Chunk, CHUNK_SIZE, initChunkSize } from './Chunk';
 
 const MAX_DIG_HISTORY = 50;
-const ROWS_PER_FRAME = 64;
+const BASE_ROWS_PER_FRAME = 32; // Reduced from 64 for mobile
 
 export class Terrain {
 	chunks: Map<number, Chunk> = new Map();
 	worldWidth: number;
 	groundLevel: number;
 	seed: number;
+	private _isMobile: boolean;
+	private _rowsPerFrame: number;
+	private _lastFrameTime: number = 0;
+	private _frameCount: number = 0;
+	private _fps: number = 60;
 
 	// Fix 2: sparse dig history — key = chunkY, value = flat diff mask
 	private digHistory: Map<number, Uint8Array> = new Map();
@@ -20,19 +25,28 @@ export class Terrain {
 		return this.worldWidth;
 	}
 
-	constructor(worldWidth: number, groundLevel: number) {
+	constructor(worldWidth: number, groundLevel: number, viewportHeight?: number) {
 		this.worldWidth = worldWidth;
 		this.groundLevel = groundLevel;
 		this.seed = Math.floor(Math.random() * 100000);
+		this._isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 
-		// Pre-warm chunks 0 and 1 synchronously so there's no pop-in at startup
+		// Initialize chunk size based on viewport
+		if (viewportHeight) {
+			initChunkSize(viewportHeight);
+		}
+
+		// Set adaptive rows per frame
+		this._rowsPerFrame = this._isMobile ? 16 : BASE_ROWS_PER_FRAME;
+
+		// Pre-warm chunks 0 and 1 synchronously
 		this._generateSync(0);
 		this._generateSync(1);
 	}
 
 	private _generateSync(chunkY: number) {
 		if (this.chunks.has(chunkY)) return;
-		const chunk = new Chunk(chunkY, this.worldWidth);
+		const chunk = new Chunk(chunkY, this.worldWidth, this._isMobile);
 		chunk.generate(this.seed);
 		this._applyDigHistory(chunk);
 		this.chunks.set(chunkY, chunk);
@@ -41,36 +55,63 @@ export class Terrain {
 	private _applyDigHistory(chunk: Chunk) {
 		const diff = this.digHistory.get(chunk.chunkY);
 		if (!diff) return;
-		// Re-carve every dug cell onto the freshly generated chunk
 		const size = this.worldWidth * CHUNK_SIZE;
 		for (let i = 0; i < size; i++) {
 			if (diff[i] === 1) {
 				const x = i % this.worldWidth;
 				const localY = Math.floor(i / this.worldWidth);
 				chunk.grid[i] = 0;
-				// Punch a 1px hole in the canvas for this cell
 				chunk['ctx'].clearRect(x, localY, 1, 1);
 			}
 		}
 	}
 
-	/** Called every frame from Game.update() — replaces ensureChunksAround */
-	tick(playerWorldY: number, playerVelocityY: number = 0) {
+	/** Update FPS tracking for adaptive throttling */
+	private _updateFPS(timestamp: number) {
+		if (this._lastFrameTime) {
+			this._frameCount++;
+			const elapsed = timestamp - this._lastFrameTime;
+			if (elapsed >= 1000) {
+				this._fps = Math.round((this._frameCount * 1000) / elapsed);
+				this._frameCount = 0;
+				this._lastFrameTime = timestamp;
+
+				// Adaptive throttling: reduce load if FPS drops below 30
+				if (this._fps < 30 && this._rowsPerFrame > 8) {
+					this._rowsPerFrame = Math.max(8, Math.floor(this._rowsPerFrame * 0.75));
+				} else if (this._fps > 50 && this._rowsPerFrame < BASE_ROWS_PER_FRAME) {
+					this._rowsPerFrame = Math.min(BASE_ROWS_PER_FRAME, this._rowsPerFrame + 4);
+				}
+			}
+		} else {
+			this._lastFrameTime = timestamp;
+		}
+	}
+
+	/** Called every frame from Game.update() */
+	tick(playerWorldY: number, playerVelocityY: number = 0, timestamp?: number) {
+		if (timestamp) this._updateFPS(timestamp);
+
 		const currentChunkY = Math.floor(playerWorldY / CHUNK_SIZE);
 
-		// Velocity-based look-ahead: fall faster → load further ahead
-		const lookahead = Math.max(2, Math.ceil((Math.abs(playerVelocityY) / CHUNK_SIZE) * 60));
+		// Reduced lookahead on mobile
+		const lookaheadBase = this._isMobile ? 1 : 2;
+		const velocityFactor = this._isMobile ? 30 : 60;
+		const lookahead = Math.max(
+			lookaheadBase,
+			Math.ceil((Math.abs(playerVelocityY) / CHUNK_SIZE) * velocityFactor)
+		);
+
 		const loadMin = Math.max(0, currentChunkY - 1);
 		const loadMax = currentChunkY + 2 + lookahead;
 
 		// Create chunk objects for any missing slots and enqueue them
 		for (let cy = loadMin; cy <= loadMax; cy++) {
 			if (!this.chunks.has(cy)) {
-				const chunk = new Chunk(cy, this.worldWidth);
+				const chunk = new Chunk(cy, this.worldWidth, this._isMobile);
 				chunk.startGeneration(this.seed);
 				this.chunks.set(cy, chunk);
 
-				// Insert into queue sorted by distance to player (closest first)
 				const dist = Math.abs(cy - currentChunkY);
 				let insertAt = this.generationQueue.length;
 				for (let i = 0; i < this.generationQueue.length; i++) {
@@ -87,14 +128,13 @@ export class Terrain {
 		for (const [cy] of this.chunks) {
 			if (cy < currentChunkY - 2 || cy > currentChunkY + 3 + lookahead) {
 				this.chunks.delete(cy);
-				// Remove from queue if pending
 				const qi = this.generationQueue.indexOf(cy);
 				if (qi !== -1) this.generationQueue.splice(qi, 1);
 			}
 		}
 
-		// Process the generation queue with a row budget
-		this._processQueue(ROWS_PER_FRAME);
+		// Process the generation queue with adaptive row budget
+		this._processQueue(this._rowsPerFrame);
 	}
 
 	private _processQueue(rowBudget: number) {
@@ -111,12 +151,12 @@ export class Terrain {
 
 			const diff = this.digHistory.get(cy);
 			const done = chunk.continueGeneration(remaining, diff);
-			remaining -= ROWS_PER_FRAME; // conservative: treat one call as full budget use
+			remaining -= rowBudget;
 
 			if (done) {
 				this.generationQueue.shift();
 			} else {
-				break; // used up budget, resume next frame
+				break;
 			}
 		}
 	}
@@ -141,10 +181,8 @@ export class Terrain {
 		}
 	}
 
-	/** Fix 2: persist dig cells into the diff mask for this chunkY */
 	private _recordDig(chunkY: number, cx: number, localCY: number, radius: number) {
 		if (!this.digHistory.has(chunkY)) {
-			// Cap history size
 			if (this.digHistoryOrder.length >= MAX_DIG_HISTORY) {
 				const oldest = this.digHistoryOrder.shift()!;
 				this.digHistory.delete(oldest);

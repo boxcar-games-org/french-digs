@@ -42,7 +42,8 @@ export class Game {
 		this.player = new Player(spawnX - 15, spawnY - 32);
 
 		this.wordManager = new WordManager();
-		this.wordManager.spawn(WORLD_WIDTH, GROUND_LEVEL, this.player.y);
+		// Pass viewport dimensions + player for responsive spawning
+		this.wordManager.spawn(this.width, this.height, GROUND_LEVEL, this.player);
 
 		this.handleKeyDown = this.handleKeyDown.bind(this);
 		this.handleMouseMove = this.handleMouseMove.bind(this);
@@ -93,15 +94,21 @@ export class Game {
 	}
 
 	private updateCamera() {
+		// Vertical follow with smoothing
 		const targetY = this.player.y - this.height / 3;
 		this.camera.y += (targetY - this.camera.y) * 0.1;
 		if (this.camera.y < -100) this.camera.y = -100;
+
+		// Horizontal follow with smoothing and bounds
+		const targetX = this.player.x - this.width / 2;
+		this.camera.x += (targetX - this.camera.x) * 0.1;
+		// Keep camera within world bounds
+		this.camera.x = Math.max(0, Math.min(this.camera.x, this.terrain.width - this.width));
 	}
 
 	private update() {
 		this.player.update(this.mouse, this.camera, this.terrain, this.terrain.width);
 
-		// Fix 1: pass velocity for lookahead, use tick() instead of ensureChunksAround()
 		this.terrain.tick(this.player.y, this.player.velocityY);
 
 		if (this.player.blaster.active && this.player.blaster.cooldown <= 0) {
@@ -110,7 +117,8 @@ export class Game {
 		}
 
 		if (this.wordManager.checkFound(this.player)) {
-			this.wordManager.spawn(this.terrain.width, GROUND_LEVEL, this.player.y);
+			// Pass current viewport + player for responsive respawn
+			this.wordManager.spawn(this.width, this.height, GROUND_LEVEL, this.player);
 		}
 
 		this.updateCamera();
@@ -206,7 +214,7 @@ export class Game {
 		this.ctx.fillRect(0, 0, this.width, this.height);
 
 		this.ctx.save();
-		// Fix 3: floor the camera translate to eliminate sub-pixel seams
+		// Floor the camera translate to eliminate sub-pixel seams
 		this.ctx.translate(-Math.floor(this.camera.x), -Math.floor(this.camera.y));
 
 		this.terrain.draw(this.ctx);
@@ -224,18 +232,29 @@ export class Game {
 		this.animationId = requestAnimationFrame(this.gameLoop);
 	};
 
+	/** Initialize audio on first user interaction - required for mobile autoplay policy */
+	private handleUserGesture() {
+		this.wordManager.initAudio();
+	}
+
 	private async handleKeyDown(e: KeyboardEvent) {
 		if (e.key === 'Escape') {
 			this.destroy();
 			await goto('/');
 		}
+		// Initialize audio on any key press (for keyboard users)
+		this.handleUserGesture();
 	}
 	private handleMouseMove(e: MouseEvent) {
 		this.mouse.x = e.clientX;
 		this.mouse.y = e.clientY;
 	}
 	private handleMouseDown(e: MouseEvent) {
-		if (e.button === 0) this.mouse.down = true;
+		if (e.button === 0) {
+			// Initialize audio on first mouse down (required for mobile)
+			this.handleUserGesture();
+			this.mouse.down = true;
+		}
 	}
 	private handleMouseUp(e: MouseEvent) {
 		if (e.button === 0) this.mouse.down = false;
@@ -243,6 +262,8 @@ export class Game {
 
 	private handleTouchStart(e: TouchEvent) {
 		if (e.cancelable) e.preventDefault();
+		// Initialize audio on first touch (critical for Android/iOS)
+		this.handleUserGesture();
 		if (e.touches.length > 0) {
 			this.mouse.x = e.touches[0].clientX;
 			this.mouse.y = e.touches[0].clientY;
