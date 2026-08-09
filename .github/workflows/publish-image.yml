@@ -1,0 +1,62 @@
+name: Publish GHCR image
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Delete all GHCR container images
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: boxcar-games-org
+        run: |
+          set -eu
+
+          gh api --paginate \
+            "orgs/$OWNER/packages?package_type=container&per_page=100" \
+            --jq '.[].name' |
+          while read -r package_name; do
+            [ -n "$package_name" ] || continue
+
+            gh api --paginate \
+              "orgs/$OWNER/packages/container/$package_name/versions?per_page=100" \
+              --jq '.[].id' |
+            while read -r version_id; do
+              [ -n "$version_id" ] || continue
+              gh api --method DELETE \
+                "orgs/$OWNER/packages/container/$package_name/versions/$version_id"
+            done
+          done
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Build application
+        run: npm ci && npm run build
+
+      - name: Build and publish image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/boxcar-games-org/french-digs:latest
