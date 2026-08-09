@@ -9,7 +9,7 @@
 
 <div class="container">
 	<h1>Dig Deep</h1>
-	<p>Use your blaster to dig into the earth!</p>
+	<p>Use your mining ship to dig into the earth!</p>
 	<button on:click={startGame}>Start Game</button>
 </div>
 
