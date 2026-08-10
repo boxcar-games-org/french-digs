@@ -29,21 +29,9 @@ jobs:
         run: |
           set -eu
 
-          gh api --paginate \
-            "orgs/$OWNER/packages?package_type=container&per_page=100" \
-            --jq '.[].name' |
-          while read -r package_name; do
-            [ -n "$package_name" ] || continue
-
-            gh api --paginate \
-              "orgs/$OWNER/packages/container/$package_name/versions?per_page=100" \
-              --jq '.[].id' |
-            while read -r version_id; do
-              [ -n "$version_id" ] || continue
-              gh api --method DELETE \
-                "orgs/$OWNER/packages/container/$package_name/versions/$version_id"
-            done
-          done
+          package_name=french-digs
+          gh api --method DELETE \
+            "orgs/$OWNER/packages/container/$package_name"
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
